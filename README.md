@@ -72,4 +72,4 @@ Covers the spec's required cases — an **ADSR envelope shape**, a **scale/chord
 
 ## License
 
-MIT — see [LICENSE](LICENSE). © 2026 Dr Sohil Momin.
+PolyForm Noncommercial — see [LICENSE](LICENSE). © 2026 Dr Sohil Momin.
