@@ -2,6 +2,8 @@
 
 # audio-kit
 
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-2e7d32)](LICENSE)
+
 **Synthesis, theory, patterns and notation.** Zero dependencies, one file, no audio assets.
 
 synthesis · ADSR · filters · noise · mixer · music theory · patterns · notation · sonification · mastering
