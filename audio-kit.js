@@ -11,7 +11,7 @@
  * Audio must not autoplay: the browser starts it on a user gesture. Every node
  * here is created from a context you pass in, on that gesture.
  *
- * MIT License. (c) 2026 Dr Sohil Momin.
+ * PolyForm Noncommercial 1.0.0. (c) 2026 Dr Sohil Momin.
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory();
