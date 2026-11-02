@@ -19,7 +19,7 @@
 }(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  var A = { version: "0.1.0" };
+  var A = { version: "1.1.0" };
 
   /* ============================================================ theory */
 
@@ -93,6 +93,32 @@
 
   var Synth = {};
   A.synth = Synth;
+
+  // Nothing above Nyquist: harmonics that cross it fold back as aliasing,
+  // which is what "static" usually is. Ask before you add partials.
+  Synth.harmonics = function (sampleRate, freq, wanted) {
+    var limit = (sampleRate || 44100) * 0.45;
+    return Math.max(1, Math.min(wanted, Math.floor(limit / Math.max(20, freq))));
+  };
+
+  // A master safety curve: unity at low level, soft knee near full scale.
+  // tanh, not a clamp — a clamp is a corner, and a corner is a click.
+  Synth.softClipCurve = function (size) {
+    var n = size || 2048;
+    var curve = new Float32Array(n);
+    for (var i = 0; i < n; i++) {
+      var x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x);
+    }
+    return curve;
+  };
+
+  Synth.softClip = function (ctx, oversample) {
+    var ws = ctx.createWaveShaper();
+    ws.curve = Synth.softClipCurve(2048);
+    if (oversample) ws.oversample = "2x";
+    return ws;
+  };
 
   /* The ADSR gain at time t, for a note held `dur` seconds. A pure function, so
      the envelope's SHAPE can be tested with no audio context. */
@@ -296,6 +322,217 @@
       for (var i = 0; i < samples.length; i++) out[i] = Math.max(-ceiling, Math.min(ceiling, samples[i]));
       return out;
     }
+  };
+
+
+  /* ============================================================== time */
+  /* Deterministic time and randomness. Every generative feature in an
+   * offline app should be reproducible from a seed — that is what makes a
+   * shareable link honest. */
+
+  var Time = {};
+  A.time = Time;
+
+  // mulberry32: small, fast, good enough, and identical everywhere.
+  Time.seeded = function (seed) {
+    var s = (typeof seed === "number" ? seed : hash(seed)) >>> 0;
+    function next() {
+      s = (s + 0x6d2b79f5) >>> 0;
+      var t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+    var api = {
+      float: next,
+      int: function (n) { return Math.floor(next() * n); },
+      range: function (a, b) { return a + next() * (b - a); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; },
+      // a fork is stable per label, so changing one track cannot shift another
+      fork: function (label) { return Time.seeded(hash(String(seed) + "|" + label)); },
+    };
+    return api;
+  };
+
+  function hash(str) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h >>> 0;
+  }
+  Time.hash = hash;
+
+  // A tempo map: [{ beat, bpm }, ...]. Everything that converts beats to
+  // seconds goes through secondsAt, so rubato and ritardando stay coherent.
+  Time.map = function (segments, base) {
+    var clean = (segments || []).map(function (s) {
+      return { beat: Math.max(0, s.beat), bpm: clampBpm(s.bpm) };
+    }).sort(function (a, b) { return a.beat - b.beat; });
+    if (!clean.length || clean[0].beat > 0) clean.unshift({ beat: 0, bpm: clampBpm(base || 100) });
+
+    var starts = [0];
+    for (var i = 1; i < clean.length; i++) {
+      starts[i] = starts[i - 1] + (clean[i].beat - clean[i - 1].beat) * 60 / clean[i - 1].bpm;
+    }
+
+    function find(arr, value) {
+      var lo = 0, hi = arr.length - 1;
+      while (lo < hi) {
+        var mid = (lo + hi + 1) >> 1;
+        if (arr[mid] <= value) lo = mid; else hi = mid - 1;
+      }
+      return lo;
+    }
+
+    return {
+      segments: clean,
+      secondsAt: function (beat) {
+        var b = Math.max(0, beat);
+        var i = find(clean.map(function (s) { return s.beat; }), b);
+        return starts[i] + (b - clean[i].beat) * 60 / clean[i].bpm;
+      },
+      beatAt: function (sec) {
+        var s = Math.max(0, sec);
+        var i = find(starts, s);
+        return clean[i].beat + (s - starts[i]) * clean[i].bpm / 60;
+      },
+      bpmAt: function (beat) {
+        var b = Math.max(0, beat), bpm = clean[0].bpm;
+        for (var j = 0; j < clean.length; j++) if (clean[j].beat <= b) bpm = clean[j].bpm;
+        return bpm;
+      },
+      min: Math.min.apply(null, clean.map(function (s) { return s.bpm; })),
+      max: Math.max.apply(null, clean.map(function (s) { return s.bpm; })),
+    };
+  };
+
+  function clampBpm(bpm) { return Math.max(20, Math.min(500, Math.round(bpm * 100) / 100)); }
+
+  // How much a human drifts off the grid, in seconds, at a given tempo.
+  Time.humane = function (rng, bpm) {
+    var beatSec = 60 / (bpm || 100);
+    var scale = Math.max(0.0015, Math.min(0.012, beatSec * 0.02));
+    return (rng.float() * 2 - 1) * scale;
+  };
+
+  /* ========================================================= scheduling */
+  /* A lookahead scheduler with a watchdog. setInterval jitters when the main
+   * thread is busy, and a throttled tab stops it entirely — the watchdog is
+   * what stops a song from simply ending halfway through. */
+
+  A.sched = function (ctx, opts) {
+    var o = opts || {};
+    var horizon = o.horizon || 0.2;
+    var interval = o.interval || 0.025;
+    var onTick = o.onTick;
+    var onLate = o.onLate || null;
+    var timer = null, watchdog = null, last = 0, running = false;
+
+    function tick() {
+      if (!running) return;
+      last = Date.now();
+      onTick(ctx.currentTime, horizon, onLate);
+    }
+
+    return {
+      start: function () {
+        if (running) return;
+        running = true;
+        last = Date.now();
+        timer = setInterval(tick, interval * 1000);
+        watchdog = setInterval(function () {
+          if (running && Date.now() - last > 700) tick();
+        }, 500);
+        tick();
+      },
+      stop: function () {
+        running = false;
+        if (timer) clearInterval(timer);
+        if (watchdog) clearInterval(watchdog);
+        timer = watchdog = null;
+      },
+      get running() { return running; },
+    };
+  };
+
+  /* ============================================================ textures */
+  /* Beds for ambient work: filtered noise with a slow LFO and sparse events.
+   * Same idea as a full ambient mixer, small enough to live in a kit. */
+
+  var TEXTURES = {
+    rain:     { level: 0.5,  lp: 5200, hp: 420, events: 6,  decay: 0.09 },
+    wind:     { level: 0.55, lp: 1400, hp: 120, lfo: [0.07, 900] },
+    fire:     { level: 0.4,  lp: 2200, hp: 90,  events: 14, decay: 0.06 },
+    vinyl:    { level: 0.32, lp: 9000, hp: 700, events: 3,  decay: 0.05 },
+    ocean:    { level: 0.6,  lp: 900,  hp: 60,  lfo: [0.045, 600] },
+    stream:   { level: 0.45, lp: 4200, hp: 500, lfo: [0.3, 300] },
+    hum:      { level: 0.3,  lp: 300,  hp: 40 },
+  };
+  A.textures = TEXTURES;
+
+  A.texture = function (ctx, dest, o) {
+    var spec = TEXTURES[o.kind] || TEXTURES.rain;
+    var when = o.when || ctx.currentTime;
+    var dur = Math.max(0.5, o.dur || 8);
+    var rng = Time.seeded(o.seed || 1);
+
+    var out = ctx.createGain();
+    out.gain.value = 0;
+    out.connect(dest);
+
+    var src = ctx.createBufferSource();
+    src.buffer = o.noise || A.synth.noiseBuffer(ctx, 3);
+    src.loop = true;
+
+    var lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = spec.lp;
+    var hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = spec.hp;
+    src.connect(lp); lp.connect(hp); hp.connect(out);
+
+    var peak = Math.max(0.01, spec.level * (o.level == null ? 1 : o.level));
+    var attack = Math.min(2.5, Math.max(0.4, dur * 0.2));
+    var release = Math.min(2.5, Math.max(0.6, dur * 0.25));
+    out.gain.setValueAtTime(0, when);
+    out.gain.linearRampToValueAtTime(peak, when + attack);
+    out.gain.setValueAtTime(peak, Math.max(when + attack, when + dur - release));
+    out.gain.linearRampToValueAtTime(0, when + dur);
+
+    if (spec.lfo) {
+      var lfo = ctx.createOscillator();
+      var depth = ctx.createGain();
+      lfo.frequency.value = spec.lfo[0];
+      depth.gain.value = spec.lfo[1];
+      lfo.connect(depth); depth.connect(lp.frequency);
+      lfo.start(when); lfo.stop(when + dur + 0.1);
+    }
+
+    if (spec.events) {
+      for (var i = 0; i < spec.events; i++) {
+        var at = when + 0.3 + rng.float() * Math.max(0.1, dur - 0.6);
+        var g = ctx.createGain();
+        var bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 1200 + rng.float() * 3600;
+        bp.Q.value = 2 + rng.float() * 4;
+        g.gain.setValueAtTime(0, at);
+        g.gain.linearRampToValueAtTime(peak * (0.5 + rng.float() * 0.8), at + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + spec.decay + rng.float() * 0.12);
+        var tickSrc = ctx.createBufferSource();
+        tickSrc.buffer = o.noise || A.synth.noiseBuffer(ctx, 0.2);
+        tickSrc.connect(bp); bp.connect(g); g.connect(out);
+        tickSrc.start(at); tickSrc.stop(at + 0.3);
+      }
+    }
+
+    src.start(when);
+    src.stop(when + dur + 0.2);
+    return out;
   };
 
   return A;

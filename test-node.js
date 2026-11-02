@@ -77,5 +77,35 @@ ok("master: matchGain raises a quiet track to the reference", near(A.master.matc
 ok("master: the limiter clamps peaks", (function () { var o = A.master.limit([2, -2], 0.98); return near(o[0], 0.98, 1e-6) && near(o[1], -0.98, 1e-6); })());
 ok("master: the limiter leaves in-range samples alone", A.master.limit([0.5], 0.98)[0] === 0.5);
 
+
+/* ---- time, scheduling and synthesis hardening (1.1.0) ---------------- */
+var rngA = A.time.seeded("same-seed");
+var rngB = A.time.seeded("same-seed");
+ok("time: a seeded stream is reproducible", rngA.float() === rngB.float());
+
+var rngC = A.time.seeded("same-seed");
+var forkA = rngC.fork("drums").float();
+var rngD = A.time.seeded("other-seed");
+ok("time: a fork depends on the seed and the label",
+  forkA !== rngD.fork("drums").float() && forkA === A.time.seeded("same-seed").fork("drums").float());
+
+var map = A.time.map([{ beat: 0, bpm: 80 }, { beat: 16, bpm: 90 }]);
+ok("time: the map integrates a tempo change", Math.abs(map.secondsAt(16) - 12) < 1e-9);
+ok("time: the map inverts", Math.abs(map.beatAt(map.secondsAt(24)) - 24) < 1e-6);
+ok("time: the map reports its range", map.min === 80 && map.max === 90);
+
+var flat = A.time.map([{ beat: 0, bpm: 120 }]);
+ok("time: a flat map matches plain arithmetic", Math.abs(flat.secondsAt(8) - 4) < 1e-9);
+
+ok("synth: harmonics stay under Nyquist",
+  A.synth.harmonics(44100, 3000, 24) * 3000 < 44100 * 0.46);
+ok("synth: low notes keep their partials", A.synth.harmonics(44100, 110, 24) === 24);
+
+var curve = A.synth.softClipCurve(64);
+ok("synth: the soft clip is unity at low level", Math.abs(curve[32] - 0) < 0.02);
+ok("synth: the soft clip never exceeds one", curve[63] <= 1 && curve[63] > 0.7);
+ok("sched: the scheduler is constructible", typeof A.sched === "function");
+ok("textures: the kit ships more than one bed", Object.keys(A.textures).length >= 5);
+
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

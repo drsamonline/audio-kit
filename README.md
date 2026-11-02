@@ -28,8 +28,21 @@ megabytes. `game-kit` should adopt this rule: generate the music, do not ship it
 | `notation` | a staff **layout** — each note's position, so a renderer just draws it |
 | `sonify` | map the bytes of any file to sound |
 | `master` | **honest** mastering helpers: a loudness measure, a match gain, and a peak limiter |
+| `time` | **deterministic time**: a seeded PRNG with stable forks, a tempo **map** (rubato, ritardando), and human timing jitter |
+| `sched` | a lookahead **scheduler with a watchdog** — a throttled tab must not end a song halfway |
+| `texture` | seven synthesised **ambient beds** (rain, wind, fire, vinyl, ocean, stream, hum) |
+| — | `synth.harmonics()` keeps partials under Nyquist; `synth.softClip()` is a master safety curve |
 
 Everything is generated in code or stored as pattern data. **No audio assets are shipped.**
+
+## What changed in 1.1.0
+
+Four things learnt building a full generative composer on this kit:
+
+1. **Determinism is a feature, not a detail.** `A.time.seeded(seed)` gives the same stream everywhere, and `fork("drums")` is stable per label — so one track can be locked while the rest is re-rolled.
+2. **Tempo moves.** `A.time.map([{beat:0,bpm:80},{beat:16,bpm:90}])` with `secondsAt`/`beatAt`/`bpmAt`. Every beat→second conversion in a real piece has to go through it, or note *lengths* drift the moment the tempo changes.
+3. **Static is usually aliasing, and clicks are usually corners.** `synth.harmonics()` clamps partials under Nyquist; `synth.softClip()` is a `tanh` curve for the master, because a hard clamp is a corner and a corner is a click.
+4. **A scheduler needs a watchdog.** `setInterval` stops in a throttled tab; `A.sched()` notices and keeps ticking.
 
 ## Usage
 
