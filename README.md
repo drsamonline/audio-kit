@@ -85,6 +85,23 @@ node test-node.js
 
 Covers the spec's required cases — an **ADSR envelope shape**, a **scale/chord construction**, a **sequencer scheduling** case (notes land on the right beats), and a **notation layout** — plus note parsing, transposition, sonification and the mastering helpers. All headless: the theory, the envelope maths and the scheduling are pure, so they test with no audio context.
 
+## Support
+
+<img src="docs/assets/support-portrait.jpg" width="72" height="72" alt="Dr. Sohil Momin" align="left" style="border-radius:50%;margin-right:1rem">
+
+Free, offline, accountless — and staying that way. If it earned its keep:
+
+| | |
+|---|---|
+| UPI (India) | `drsohilboi@ybl` — payee Dr. Sohil Momin, open amount, or scan [the QR](docs/assets/upi-qr.svg) |
+| Ko-fi | [ko-fi.com/matneo](https://ko-fi.com/matneo) |
+| PayPal | [paypal.me/drsohilmomin](https://paypal.me/drsohilmomin?locale.x=en_GB&country.x=IN) |
+| My books | [Amazon author store](https://www.amazon.com/stores/author/B08ZT331LY/allbooks?ccs_id=aed72b9f-71d9-41dc-adee-e9368a317acc) |
+| More apps | [drsamonline.github.io](https://drsamonline.github.io/) |
+| Email | [sohilmomin2000@gmail.com](mailto:sohilmomin2000@gmail.com) |
+
+Nothing is gated behind it: no accounts, no tracking, no network requests.
+
 ## License
 
 PolyForm Noncommercial — see [LICENSE](LICENSE). © 2026 Dr Sohil Momin.
