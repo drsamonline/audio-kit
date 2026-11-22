@@ -32,10 +32,38 @@ megabytes. `game-kit` should adopt this rule: generate the music, do not ship it
 | `master` | **honest** mastering helpers: a loudness measure, a match gain, and a peak limiter |
 | `time` | **deterministic time**: a seeded PRNG with stable forks, a tempo **map** (rubato, ritardando), and human timing jitter |
 | `sched` | a lookahead **scheduler with a watchdog** — a throttled tab must not end a song halfway |
+| `voices` | **polyphony for a game**: a hard limit, same-sound coalescing, priority-based stealing, and a clock you pass in |
 | `texture` | seven synthesised **ambient beds** (rain, wind, fire, vinyl, ocean, stream, hum) |
 | — | `synth.harmonics()` keeps partials under Nyquist; `synth.softClip()` is a master safety curve |
 
 Everything is generated in code or stored as pattern data. **No audio assets are shipped.**
+
+## What changed in 1.2.0
+
+**Polyphony.** Two hundred bullets, forty footsteps and a boss roar in the same second is
+normal in a game and impossible in WebAudio: every voice is an oscillator pair, the mix
+clips and the tab stutters on the frame that spawned them. `A.voices()` is the allocator,
+and it is pure logic — no context, no clock of its own, so it tests headlessly and behaves
+identically in a replay.
+
+```js
+var mix = A.voices({ limit: 24, minGap: 0.03 });
+
+var v = mix.request({ name: "shot", priority: 5, time: game.time });
+if (v.ok) playShot(v.slot);            // v.stolen names the voice to stop, if any
+
+mix.release(v.slot);                   // when the sound ends
+mix.expire(game.time);                 // or let it time out by its duration
+mix.stats();                           // played / stolen / coalesced / refused
+```
+
+| Rule | Why |
+| --- | --- |
+| The same sound inside `minGap` does not restart | Thirty bullets in one frame are one shot, not thirty summed 6 dB louder |
+| Equal or higher priority is never stolen | Stealing an equal voice makes two sounds alternate at frame rate — a stutter, not a mix |
+| The oldest lowest-priority voice goes first | And the caller is told which one, so that oscillator can be stopped |
+| `time` is passed in, never read | `Date.now()` inside a mixer is a desync; the game's own clock is the only one that replays |
+| `expire(now)` reclaims by duration | The leak where every death cry permanently eats a slot |
 
 ## What changed in 1.1.0
 
@@ -82,10 +110,12 @@ A.notation.layout(["C4", "D4", "E4"]);    // -> { notes: [{x, step, ...}], width
 
 ```
 node test-node.js
-42 passed, 0 failed
+65 passed, 0 failed
 ```
 
 Covers the spec's required cases — an **ADSR envelope shape**, a **scale/chord construction**, a **sequencer scheduling** case (notes land on the right beats), and a **notation layout** — plus note parsing, transposition, sonification and the mastering helpers. All headless: the theory, the envelope maths and the scheduling are pure, so they test with no audio context.
+
+1.2.0 adds the allocator: a slot taken, coalescing inside `minGap` and not after it, an equal-priority newcomer refused, a roar stealing the oldest shot, a footstep never cutting a roar, `expire`, `release`, the stats and a shrunken limit.
 
 ## Support
 

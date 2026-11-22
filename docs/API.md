@@ -1,6 +1,6 @@
 # audio-kit — API reference
 
-**Version 1.1.0.** <div align="center">
+**Version 1.2.0.** <div align="center">
 
 Generated from the source in this repository: every name, argument and
 note below is read out of the kit file, so it cannot describe a function
@@ -12,7 +12,7 @@ AudioKit.freq(...)
 // or: const AudioKit = require('./audio-kit.js')
 ```
 
-## The surface (11 entries)
+## The surface (12 entries)
 
 | Name | Arguments | What it does |
 |---|---|---|
@@ -27,6 +27,7 @@ AudioKit.freq(...)
 | `AudioKit.chords` | `()` | — |
 | `AudioKit.chord` | `(root, quality)` | — |
 | `AudioKit.step` | `(p)` | the diatonic step of a note, for placing it on a staff (letter + 7*octave) |
+| `AudioKit.voices` | `(opts)` | polyphony: a hard `limit`, same-sound coalescing inside `minGap`, priority stealing, `expire(now)` |
 
 ## Notes
 

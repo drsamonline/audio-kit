@@ -19,7 +19,7 @@
 }(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  var A = { version: "1.1.0" };
+  var A = { version: "1.2.0" };
 
   /* ============================================================ theory */
 
@@ -533,6 +533,118 @@
     src.start(when);
     src.stop(when + dur + 0.2);
     return out;
+  };
+
+  /* ============================================================ voices */
+  /* Polyphony for a game, not for a song. Two hundred bullets, forty footsteps
+     and a boss roar in the same second is normal in a game and impossible in
+     WebAudio: every voice is an oscillator pair, the mix clips, and the tab
+     stutters on the frame that spawned them.
+
+     Four rules, each one a sound that went wrong:
+
+     1. THE SAME SOUND WITHIN `minGap` DOES NOT RESTART. Thirty bullets leaving the
+        gun in one frame are one shot sound, not thirty summed 6 dB louder.
+     2. A VOICE NEVER STEALS ONE OF EQUAL OR HIGHER PRIORITY. Music and dialogue
+        outrank footsteps, so a step is refused rather than cutting the line the
+        player is listening to. Equal priority is refused too — stealing an equal
+        voice makes the two alternate at frame rate, which is a stutter, not a mix.
+     3. WHEN THE POOL IS FULL THE OLDEST LOWEST-PRIORITY VOICE GOES, and the caller
+        is told which one so it can stop that oscillator. Silence is not an option:
+        a slot that is never reclaimed is a sound the game can never play again.
+     4. TIME IS PASSED IN, NEVER READ. `request({ time })` and `expire(now)` take the
+        game's own clock, so the allocation is deterministic in a test and identical
+        in a replay. `Date.now()` inside an audio mixer is a desync.
+
+     A voice that is never released is reclaimed by `expire(now)` once its `duration`
+     has passed — the leak where every death cry permanently eats a slot. */
+
+  A.voices = function (opts) {
+    opts = opts || {};
+    var limit = opts.limit > 0 ? opts.limit | 0 : 24;
+    var minGap = opts.minGap >= 0 ? opts.minGap : 0.03;
+    var slots = [];
+    var stolen = 0, coalesced = 0, refused = 0, played = 0;
+
+    function live() {
+      var out = [], i;
+      for (i = 0; i < slots.length; i++) if (slots[i]) out.push(i);
+      return out;
+    }
+
+    return {
+      limit: limit,
+      /* Ask for a voice. `{ name, priority, time, duration }`; priority is higher =
+         more important (music 10, boss 8, weapon 5, footstep 1). */
+      request: function (req) {
+        req = req || {};
+        var name = req.name == null ? "sfx" : String(req.name);
+        var priority = req.priority == null ? 5 : req.priority;
+        var time = req.time || 0;
+        var i, v;
+
+        for (i = 0; i < slots.length; i++) {          // rule 1
+          v = slots[i];
+          if (!v || v.name !== name) continue;
+          if (time - v.time < minGap) {
+            coalesced++;
+            return { ok: false, reason: "coalesced", slot: i };
+          }
+        }
+
+        if (live().length < limit) {
+          for (i = 0; i < slots.length; i++) if (!slots[i]) break;
+          slots[i] = { name: name, priority: priority, time: time, ends: time + (req.duration || 0) };
+          played++;
+          return { ok: true, slot: i, stolen: null };
+        }
+
+        var victim = -1;                               // rule 3
+        for (i = 0; i < slots.length; i++) {
+          v = slots[i];
+          if (!v) continue;
+          if (victim < 0) { victim = i; continue; }
+          var w = slots[victim];
+          if (v.priority < w.priority || (v.priority === w.priority && v.time < w.time)) victim = i;
+        }
+        var old = slots[victim];
+        if (old && old.priority >= priority) {         // rule 2
+          refused++;
+          return { ok: false, reason: "priority", slot: -1 };
+        }
+        stolen++;
+        played++;
+        slots[victim] = { name: name, priority: priority, time: time, ends: time + (req.duration || 0) };
+        return { ok: true, slot: victim, stolen: old ? old.name : null };
+      },
+      /** Free a slot the moment its sound is over. */
+      release: function (slot) {
+        if (slot >= 0 && slot < slots.length) slots[slot] = null;
+        return this;
+      },
+      /** Reclaim every voice whose duration has run out by `now`. */
+      expire: function (now) {
+        var n = 0, i;
+        for (i = 0; i < slots.length; i++) {
+          if (slots[i] && slots[i].ends > 0 && now >= slots[i].ends) { slots[i] = null; n++; }
+        }
+        return n;
+      },
+      setLimit: function (n) {
+        if (n > 0) {
+          limit = n | 0;
+          this.limit = limit;
+          if (slots.length > limit) slots.length = limit;
+        }
+        return this;
+      },
+      setGap: function (s) { if (s >= 0) minGap = s; return this; },
+      active: function () { return live().length; },
+      /* What was refused and why, so a mix is tuned from evidence. */
+      stats: function () {
+        return { limit: limit, active: live().length, played: played, stolen: stolen, coalesced: coalesced, refused: refused };
+      }
+    };
   };
 
   return A;

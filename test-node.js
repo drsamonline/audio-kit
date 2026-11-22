@@ -107,5 +107,34 @@ ok("synth: the soft clip never exceeds one", curve[63] <= 1 && curve[63] > 0.7);
 ok("sched: the scheduler is constructible", typeof A.sched === "function");
 ok("textures: the kit ships more than one bed", Object.keys(A.textures).length >= 5);
 
+/* ---- voices (1.2.0) ---- */
+var vm = A.voices({ limit: 2, minGap: 0.05 });
+ok("voices: a request takes a slot", vm.request({ name: "shot", priority: 5, time: 0 }).ok === true && vm.active() === 1);
+var same = vm.request({ name: "shot", priority: 5, time: 0.01 });
+ok("voices: the same sound inside minGap does not restart", same.ok === false && same.reason === "coalesced");
+ok("voices: the same sound after minGap is a new voice", vm.request({ name: "shot", priority: 5, time: 0.2 }).ok === true && vm.active() === 2);
+
+var full = vm.request({ name: "step", priority: 5, time: 0.3 });
+ok("voices: a full pool refuses an equal-priority newcomer", full.ok === false && full.reason === "priority");
+var boss = vm.request({ name: "roar", priority: 9, time: 0.4 });
+ok("voices: a higher priority steals the oldest lowest one", boss.ok === true && boss.stolen === "shot");
+ok("voices: a stolen slot is reused, not added", vm.active() === 2 && boss.slot === 0);
+
+var low = vm.request({ name: "step", priority: 1, time: 0.5 });
+ok("voices: a footstep never cuts a roar", low.ok === false && low.reason === "priority");
+
+var vm2 = A.voices({ limit: 4, minGap: 0 });
+var slotA = vm2.request({ name: "hit", priority: 3, time: 0, duration: 0.2 });
+ok("voices: expire reclaims a voice whose duration ran out", vm2.expire(0.25) === 1 && vm2.active() === 0);
+vm2.release(slotA.slot);
+ok("voices: release frees the slot at once", vm2.active() === 0);
+vm2.request({ name: "hit", priority: 3, time: 1 });
+ok("voices: stats count what was refused", vm2.stats().played === 2 && typeof vm2.stats().refused === "number");
+
+var vm3 = A.voices({ limit: 8, minGap: 0 });
+for (var vi = 0; vi < 8; vi++) vm3.request({ name: "n" + vi, priority: 2, time: vi });
+vm3.setLimit(3);
+ok("voices: a smaller limit trims the pool", vm3.active() <= 3 && vm3.limit === 3);
+
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);
