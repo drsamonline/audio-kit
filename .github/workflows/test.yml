@@ -22,3 +22,6 @@ jobs:
         with:
           node-version: "20"
       - run: node test-node.js
+
+      - name: Check every asset is declared
+        run: node tools/check-assets.mjs

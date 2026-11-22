@@ -106,6 +106,12 @@ A.notation.layout(["C4", "D4", "E4"]);    // -> { notes: [{x, step, ...}], width
 - **Everything is reimplemented.** References (the tracker tradition, Orca, MuseScore, matchering, binary-synth, Neothesia) are named in comments; **no code is copied**, and the copyleft ones are technique only.
 - **The mastering helpers are a matching aid, not a replacement for an engineer** — say so in any app that uses them.
 
+## Assets
+
+Every binary asset in this repository is declared in `ASSETS.json` with a source and a
+licence, and `node tools/check-assets.mjs` — run in CI — fails on an undeclared file, a
+missing source, or a copyleft licence this licence cannot carry.
+
 ## Tests
 
 ```
